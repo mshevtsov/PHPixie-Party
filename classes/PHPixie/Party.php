@@ -1,5 +1,5 @@
 <?php
-namespace MShevtsov;
+namespace PHPixie;
 
 Class Party {
 	public $pixie;
