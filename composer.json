@@ -1,0 +1,16 @@
+{
+	"name": "mshevtsov/phpixie-party",
+	"description": "Party - PHPixie module for registration of participants of conferences.",
+	"homepage": "http://github.com/mshevtsov/PHPixie-Party",
+	"type": "library",
+	"license": "MIT",
+	"authors": [
+		{
+			"name": "Mikhail Shevtsov",
+			"email": "mikhail.shevtsov@gmail.com"
+		}
+	],
+	"autoload": {
+		"psr-0": {"PHPixie": "classes/"}
+	}
+}
