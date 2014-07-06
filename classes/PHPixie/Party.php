@@ -70,12 +70,6 @@ Class Party {
 		$sumExcess = ($sumPaid + $sumFree) > $sumFull
 			? ($sumPaid + $sumFree - $sumFull)
 			: 0;
-		// $needToPrepay = $needToPrepay > $sumFree
-		// 	? $needToPrepay - $sumFree
-		// 	: 0;
-		// $needToFull = $needToFull > $sumFree
-		// 	? $needToFull - $sumFree
-		// 	: 0;
 
 		return array(
 			'sumPrepay' =>		$sumPrepay,
@@ -106,7 +100,7 @@ Class Party {
 		if(!$parts)
 			$parts = $this->getParticipants();
 		if(!is_array($parts))
-			$parts = array($parts); //$this->getParticipants($parts->id);//array($parts->id => $parts);
+			$parts = array($parts);
 
 		// пробегаемся по нуждам указанных участников по порядку
 		// сначала по нуждающимся в предоплате
@@ -154,12 +148,6 @@ Class Party {
 
 
 
-
-	// private function loadLibs() {
-	// 	$this->participant = new \PHPixie\Party\Participant;
-	// 	$this->order = new \PHPixie\Party\Order;
-	// 	$this->payment = new \PHPixie\Party\Payment;
-	// }
 
 
 	// Возвращает в виде массива одного или всех участников, зарегистрированных
@@ -229,12 +217,8 @@ Class Party {
 
 	// очень деловая функция. это то, что мы делаем, принимая деньги в базу
 	public function approveOrder($order, $onpay_id, $balance) {
-		// временно отключил для теста - чтобы один платёж проводить много раз
-		// if($order->payed==1)
-		// 	return false;
-// http://2014.imolod.ru/register/onpay?type=pay&onpay_id=9452250&amount=897.0&balance_amount=897.0&balance_currency=TST&order_amount=897.0&order_currency=TST&exchange_rate=1.0&pay_for=1022&paymentDateTime=2014-07-04T23%3A29%3A38%2B04%3A00&note&user_email=lobotomy%40volgograd.ru&user_phone=&protection_code&day_to_expiry&paid_amount=897.0&md5=87AFDD4B1AFC7FFC842A9EAD9E1C8A6D
-
-// if($balance==897) $balance = 3500;
+		if($order->payed==1)
+			return false;
 
 		$order->payed = 1;
 		$order->datepayed = date('Y-m-d H:i:s',time());
@@ -282,12 +266,6 @@ Class Party {
 			}
 			$sumFull = $sumBasic + $sumMeal;
 
-// Предоплата одного id 24
-// http://2014.imolod.ru/register/onpay?type=pay&onpay_id=9450186&amount=500.0&balance_amount=500.0&balance_currency=TST&order_amount=500.0&order_currency=TST&exchange_rate=1.0&pay_for=1011&paymentDateTime=2014-07-04T19%3A40%3A48%2B04%3A00&note&user_email=lobotomy%40volgograd.ru&user_phone=&protection_code&day_to_expiry&paid_amount=500.0&md5=0FD811A4A91CBDBA1EDF85B5D93BCAA1
-
-// print_r($toPay);
-// print "prepay={$sumPrepay}, full={$sumFull}, balance: ". (float)$balance ."<br/>\n";
-
 			// если сумма перевода совпадает с суммой предоплаты для целевых участников
 			if((float)$balance==$sumPrepay) {
 				foreach($parts as $part) {
@@ -295,30 +273,24 @@ Class Party {
 					$part->money += $toPay[$part->id]['prepay'];
 					if(!$part->paydate && $part->money>=$curPeriod['prices']['prepay'])
 						$part->paydate = date('Y-m-d H:i:s',time());
-					// print "id_{$part->id}=>{$toPay[$part->id]['prepay']}<br/>\n";
 					$part->save();
 				}
-				// print "rest balance: $balance<br/>\n";
 			}
 			// если сумма перевода совпадает с полным взносом для них
 			else if((float)$balance==$sumFull) {
 				foreach($parts as $part) {
 					$balance -= $toPay[$part->id]['full'];
 					$part->money += $toPay[$part->id]['full'];
-					// print "id_{$part->id}=>{$toPay[$part->id]['full']}<br/>\n";
 					$part->save();
 				}
-				// print "rest balance: $balance<br/>\n";
 			}
 			// если не совпадает ни с тем, ни с другим, кладём на счёт пользователя
 			else if($order->user->loaded()) {
 				$order->user->money += $order->balance;
 				$order->user->save();
-				// print "unknown type<br/>\n";
 			}
 			else
 				return false;
-			// exit;
 
 
 		}
