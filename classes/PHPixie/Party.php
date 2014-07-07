@@ -220,6 +220,8 @@ Class Party {
 		if($order->payed==1)
 			return false;
 
+		$notifyBalance = $balance;
+
 		$order->payed = 1;
 		$order->datepayed = date('Y-m-d H:i:s',time());
 		$order->onpay_id = $onpay_id;
@@ -302,14 +304,14 @@ Class Party {
 		else
 			return false;
 
-		$message = "PAYMENT: {$balance}";
+		$message = "PAYMENT: ". $notifyBalance;
 		if($order->email)
 			$message .= ", FROM: {$order->email}";
 		$sms = new \Zelenin\smsru($this->pixie->config->get("party.notification.api_key"));
-		$sms->sms_send($message);
+		$sms->sms_send($this->pixie->config->get("party.notification.admin_number"), $message);
 
 		if($order->email)
-			$this->send_confirmation($email, $order->balance, isset($order->user->name) ? $order->user->name : null);
+			$this->send_confirmation($order->email, $notifyBalance, isset($order->user->name) ? $order->user->name : null);
 
 		return true;
 	}
@@ -318,7 +320,7 @@ Class Party {
 
 	private function send_confirmation($email, $sum, $name=null) {
 		$emailTitle = "Подтверждение оплаты";
-		$emailContent = "<p>Мир вам". ($name ? ", {$name}!" : "") ."</p>\n<p>Уведомляем, что ваш перевод на сумму {$sum} получен. Спасибо!</p>\n<p>Следите за новостями о конференции в группе <a href=\"http://vk.com/imolod14\">http://vk.com/imolod14</a> и пользуйтесь системой управления вашим участием: <a href=\"http://2014.imolod.ru/register/profile\">http://2014.imolod.ru/register/profile</a></p>\n";
+		$emailContent = "<p>Мир вам". ($name ? ", {$name}!" : "") ."</p>\n<p>Уведомляем, что ваш перевод на сумму {$sum} получен. Спасибо!</p>\n<p>Следите за новостями о конференции в группе <a href=\"". $this->pixie->config->get("party.contacts.group") ."\">". $this->pixie->config->get("party.contacts.group") ."</a> и пользуйтесь системой управления вашим участием: <a href=\"http://". $this->pixie->config->get("party.event.domain") ."/register/profile\">http://". $this->pixie->config->get("party.event.domain") ."/register/profile</a></p>\n";
 		ob_start();
 		require_once $this->pixie->find_file('views','email');
 		$htmlText = ob_get_clean();
@@ -328,8 +330,8 @@ Class Party {
 			: $email;
 		$result = $this->pixie->email->send(
 			$recepient,
-			array('info@imolod.ru'=>'Организаторы Я МОЛОДОЙ!'),
-			"Я МОЛОДОЙ: оплата получена",
+			array($this->pixie->config->get("party.contacts.info")=>'Организаторы '. $this->pixie->config->get("party.event.short_title")),
+			$this->pixie->config->get("party.event.short_title") .": оплата получена",
 			$htmlText,
 			true
 			);
