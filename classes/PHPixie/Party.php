@@ -308,8 +308,32 @@ Class Party {
 		$sms = new \Zelenin\smsru($this->pixie->config->get("party.notification.api_key"));
 		$sms->sms_send($message);
 
+		if($order->email)
+			$this->send_confirmation($email, $order->balance, isset($order->user->name) ? $order->user->name : null);
+
 		return true;
 	}
 
+
+
+	private function send_confirmation($email, $sum, $name=null) {
+		$emailTitle = "Подтверждение оплаты";
+		$emailContent = "<p>Мир вам". ($name ? ", {$name}!" : "") ."</p>\n<p>Уведомляем, что ваш перевод на сумму {$sum} получен. Спасибо!</p>\n<p>Следите за новостями о конференции в группе <a href=\"http://vk.com/imolod14\">http://vk.com/imolod14</a> и пользуйтесь системой управления вашим участием: <a href=\"http://2014.imolod.ru/register/profile\">http://2014.imolod.ru/register/profile</a></p>\n";
+		ob_start();
+		require_once $this->pixie->find_file('views','email');
+		$htmlText = ob_get_clean();
+
+		$recepient = $name
+			? array($email => "=?utf-8?B?". base64_encode($name) ."?=")
+			: $email;
+		$result = $this->pixie->email->send(
+			$recepient,
+			array('info@imolod.ru'=>'Организаторы Я МОЛОДОЙ!'),
+			"Я МОЛОДОЙ: оплата получена",
+			$htmlText,
+			true
+			);
+		return $result;
+	}
 
 }
