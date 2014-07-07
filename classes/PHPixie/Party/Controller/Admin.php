@@ -2,26 +2,13 @@
 
 namespace PHPixie\Party\Controller;
 
-class Admin extends \PHPixie\Controller {
+class Admin extends \App\Page {
 
 
 	public function before() {
-		$this->view = $this->pixie->view('admin');
-	}
-
-
-
-
-
-
-
-
-
-
-
-	public function action_index() {
 		if(!$this->logged_in('admin'))
-			return;
+			return $this->redirect("/register");
+		$this->view = $this->pixie->view('admin');
 		$this->view->user = $this->pixie->auth->user();
 	}
 
@@ -32,31 +19,16 @@ class Admin extends \PHPixie\Controller {
 
 
 
-
-
-
-
-
-
-	public function action_login() {
-		if($this->request->method == 'POST'){
-			$login = $this->request->post('username');
-			$password = $this->request->post('password');
-
-			//Attempt to login the user using his
-			//username and password
-			$logged = $this->pixie->auth
-					->provider('password')
-					->login($login, $password);
-
-			//On successful login redirect the user to
-			//our protected page
-			if ($logged)
-				return $this->redirect('/admin');
-		}
-		//Include 'login.php' subview
-		$this->view->subview = 'admin-login';
+	public function action_index() {
+		$this->view->page['content'] = 'Wazzup!';
 	}
+
+
+
+
+
+
+
 
 
 
@@ -72,7 +44,7 @@ class Admin extends \PHPixie\Controller {
 
 	public function action_logout() {
 		$this->pixie->auth->logout();
-		$this->redirect('/admin/login');
+		$this->redirect('/register');
 	}
 
 
@@ -92,13 +64,8 @@ class Admin extends \PHPixie\Controller {
 
 
 	public function action_list() {
-		if(!$this->logged_in('admin'))
-			return;
-		$this->view->user = $this->pixie->auth->user();
 
-		if($this->request->param('model'))
-			$model = $this->request->param('model');
-		else
+		if(!$model = $this->request->param('model'))
 			return $this->redirect("/admin/");
 
 		if($this->request->method == 'POST') {
@@ -108,42 +75,25 @@ class Admin extends \PHPixie\Controller {
 		}
 
 		$this->view->model = $model;
+		if(!$this->pixie->orm->get($model)) {
+			die("bad model");
+		}
 		$this->view->columns = $this->pixie->orm->get($model)->columns();
-		$this->view->columnsText = $this->pixie->config->get('admin.columns');
+		// $this->view->columnsText = $this->pixie->config->get('admin.columns');
 
-		if(in_array('parent', $this->view->columns)) {
-			if(in_array('weight', $this->view->columns)) {
-				$this->view->items = $this->pixie->orm->get($model)
-					->where("parent",0)
-					->order_by('weight','asc')
-					->find_all();
-			}
-			else {
-				$this->view->items = $this->pixie->orm->get($model)
-					->where("parent",0)
-					->find_all();
-			}
-			$this->view->subview = 'admin-list-sort';
+
+		if(in_array('date', $this->view->columns)) {
+			$this->view->items = $this->pixie->orm->get($model)
+				->order_by('date','desc')
+				->find_all()->as_array(true);
+			$this->view->subview = 'admin-list';
 		}
 		else {
-			if(in_array('weight', $this->view->columns)) {
-				$this->view->items = $this->pixie->orm->get($model)
-					->order_by('weight','asc')
-					->find_all();//->as_array(true);
-				$this->view->subview = 'admin-list-sort';
-			}
-			else if(in_array('date', $this->view->columns)) {
-				$this->view->items = $this->pixie->orm->get($model)
-					->order_by('date','desc')
-					->find_all()->as_array(true);
-				$this->view->subview = 'admin-list';
-			}
-			else {
-				$this->view->items = $this->pixie->orm->get($model)
-					->find_all()->as_array(true);
-				$this->view->subview = 'admin-list';
-			}
+			$this->view->items = $this->pixie->orm->get($model)
+				->find_all()->as_array(true);
+			$this->view->page['subview'] = 'admin-list';
 		}
+
 	}
 
 
