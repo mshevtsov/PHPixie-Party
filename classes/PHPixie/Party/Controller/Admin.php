@@ -2,7 +2,7 @@
 
 namespace PHPixie\Party\Controller;
 
-class Admin extends \App\Page {
+class Admin extends \PHPixie\Controller {
 
 
 	public function before() {
