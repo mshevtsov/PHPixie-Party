@@ -1,7 +1,6 @@
 <?php
 
-namespace PHPixie\Party;
-// namespace App\Controller;
+namespace PHPixie\Party\Controller;
 
 class Admin extends \App\Page {
 
