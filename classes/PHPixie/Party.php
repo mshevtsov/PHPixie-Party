@@ -226,12 +226,6 @@ Class Party {
 		$order->balance = $balance;
 		$order->save();
 
-		$message = "PAYMENT: {$balance}";
-		if($order->email)
-			$message .= ", FROM: {$order->email}";
-		$sms = new \Zelenin\smsru($this->pixie->config->get("party.notification.api_key"));
-		$sms->sms_send($message);
-
 		if($order->purpose) {
 			$ids = unserialize($order->purpose);
 
@@ -307,6 +301,13 @@ Class Party {
 		}
 		else
 			return false;
+
+		$message = "PAYMENT: {$balance}";
+		if($order->email)
+			$message .= ", FROM: {$order->email}";
+		$sms = new \Zelenin\smsru($this->pixie->config->get("party.notification.api_key"));
+		$sms->sms_send($message);
+
 		return true;
 	}
 
