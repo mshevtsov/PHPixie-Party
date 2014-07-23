@@ -14,8 +14,8 @@
 			<ul class="nav navbar-nav">
 <?php
 $menu = $this->pixie->config->get('party.admin.menu');
-foreach($menu as $menutitle => $menulink): ?>
-				<li><a href="/admin/list/<?php echo $menulink; ?>"><?php echo $menutitle; ?></a></li>
+foreach($menu as $menutitle=>$menulink): ?>
+				<li><a href="/admin/<?=$menulink?>"><?=$menutitle?></a></li>
 <?php endforeach; ?>
 				<li><a href="/admin/logout">Выход</a></li>
 			</ul>

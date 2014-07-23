@@ -43,7 +43,7 @@ Class Party {
 			$sumBasic += $curPeriod['prices']['basic'];
 			$toPay[$part->id]['prepay'] = $curPeriod['prices']['prepay'];
 			$toPay[$part->id]['full'] = $curPeriod['prices']['basic'];
-			if($part->meal) {
+			if($part->meal && isset($curPeriod['prices']['daysmeal'][$part->days])) {
 				$countMeal++;
 				$sumMeal += $curPeriod['prices']['daysmeal'][$part->days];
 				$toPay[$part->id]['full'] += $curPeriod['prices']['daysmeal'][$part->days];
@@ -107,7 +107,7 @@ Class Party {
 		$curPeriod = $this->getCurrentPeriod();
 		foreach($parts as $part) {
 			if($check['toPay'][$part->id]['prepay']) {
-				if($check['toPay'][$part->id]['prepay'] < $user->money) {
+				if($check['toPay'][$part->id]['prepay'] <= $user->money) {
 					$part->money += $check['toPay'][$part->id]['prepay'];
 					$user->money -= $check['toPay'][$part->id]['prepay'];
 					if(!$part->paydate && $part->money>=$curPeriod['prices']['prepay'])
@@ -127,9 +127,11 @@ Class Party {
 		// теперь по нуждающимся в полном взносе
 		foreach($parts as $part) {
 			if($check['toPay'][$part->id]['full']) {
-				if($check['toPay'][$part->id]['full'] < $user->money) {
+				if($check['toPay'][$part->id]['full'] <= $user->money) {
 					$part->money += $check['toPay'][$part->id]['full'];
 					$user->money -= $check['toPay'][$part->id]['full'];
+					if(!$part->paydate && $part->money>=$curPeriod['prices']['prepay'])
+						$part->paydate = date('Y-m-d H:i:s',time());
 					$part->save();
 					$user->save();
 				}
@@ -283,6 +285,8 @@ Class Party {
 				foreach($parts as $part) {
 					$balance -= $toPay[$part->id]['full'];
 					$part->money += $toPay[$part->id]['full'];
+					if(!$part->paydate && $part->money>=$curPeriod['prices']['prepay'])
+						$part->paydate = date('Y-m-d H:i:s',time());
 					$part->save();
 				}
 			}
@@ -314,6 +318,110 @@ Class Party {
 			$this->send_confirmation($order->email, $notifyBalance, isset($order->user->name) ? $order->user->name : null);
 
 		return true;
+	}
+
+
+
+
+
+	public function providedPartInfo(&$part) {
+		$result = array(
+			'totalPoints' => 0,
+			'userPoints' => 0,
+			'percent' => 0,
+			'canProvide' => array(),
+		);
+		$fields = $this->pixie->config->get("party.userfields");
+
+		// Берём участника
+		if(is_numeric($part))
+			if(!$part = $this->pixie->orm->get('participant',$part))
+				return false;
+
+		foreach($fields as $key => $value) {
+			if(isset($value['points'])) {
+
+				// Что мы делаем с местными:
+				if(in_array($part->city, $this->pixie->config->get("party.event.host_city"))) {
+					// пропускаем поля "жильё" и "транспорт"
+					if($key=='accomodation' || $key=='transport')
+						continue;
+				}
+				$result['totalPoints'] += $value['points'];
+
+				// Определяем незаполненные поля, чтобы пропустить их учёт участнику
+				if($value['type']=='date' && $part->$key=='0000-00-00') {
+					$result['canProvide'][] = $key;
+					continue;
+				}
+				if($key=='birthday' && date_diff(date_create($part->$key), date_create('now'))->y <= 1) {
+					$result['canProvide'][] = $key;
+					continue;
+				}
+				if(($value['type']=='text' || $value['type']=='tel' || $value['type']=='url' || $value['type']=='email')
+					&& trim($part->$key)=='') {
+					$result['canProvide'][] = $key;
+					continue;
+				}
+				if($value['type']=='boolset' && !count(unserialize($part->$key))) {
+					$result['canProvide'][] = $key;
+					continue;
+				}
+				if($value['type']=='select' && is_array($value['options']) && !in_array($part->$key,array_keys($value['options']))) {
+					$result['canProvide'][] = $key;
+					continue;
+				}
+				else if($value['type']=='select' && $value['options']=='relationship' && !$part->$key->loaded()) {
+					$result['canProvide'][] = $key;
+					continue;
+				}
+
+				$result['userPoints'] += $value['points'];
+			}
+		}
+		$result['percent'] = round($result['userPoints'] / $result['totalPoints'] * 100);
+		return $result;
+	}
+
+
+
+	// Выдаёт количество попутчиков участника
+	public function getFellowsCountByPart(&$part, $numberOnly=true) {
+		if(is_numeric($part)) {
+			if(!$part = $this->pixie->orm->get('participant',$part))
+				return false;
+		}
+		if($part->region->loaded())
+			$result = $this->pixie->orm->get('participant')->where('id','<>',$part->id)->where('cancelled',0)->where('city',$part->city)->where('or',array('region_id',$part->region->id))->count_all();
+		else
+			$result = $this->pixie->orm->get('participant')->where('id','<>',$part->id)->where('cancelled',0)->where('city',$part->city)->count_all();
+		if(!$numberOnly) {
+			if(!$result)
+				$result = 'нет попутчиков';
+			else
+				$result .= ' '. $this->declension($result, array('попутчик','попутчика','попутчиков'));
+		}
+		return $result;
+	}
+
+
+
+	// Склонение числительных
+	private function declension($int, $expr) {
+		if(count($expr) < 3)
+			$expr[2] = $expr[1];
+		$count = (int)$int % 100;
+		if($count>4 && $count<21)
+			return $expr[2];
+		else {
+			$count = $count % 10;
+			if($count==1)
+				return $expr[0];
+			elseif($count>1 && $count<5)
+				return $expr[1];
+			else
+				return $expr[2];
+		}
 	}
 
 
