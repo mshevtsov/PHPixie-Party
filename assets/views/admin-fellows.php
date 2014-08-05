@@ -8,7 +8,7 @@
 				<tbody>
 				<?php foreach($page['fellowCity'] as $part): ?>
 					<tr>
-						<td><?php echo "<a href=\"/admin/participants/{$part->id}\">{$part->firstname} {$part->lastname}</a>"; ?></td>
+						<td><?php echo "<a href=\"/admin/participants/{$part->id}\">{$part->firstname} {$part->lastname}</a>". ($part->money ? "<sup>{$part->money}</sup>" : ""); ?></td>
 						<!-- <td><?php ?></td> -->
 					</tr>
 				<?php endforeach; ?>
@@ -23,7 +23,7 @@
 				<tbody>
 				<?php foreach($page['fellowRegion'] as $part): ?>
 					<tr>
-						<td><?php echo "<a href=\"/admin/participants/{$part->id}\">{$part->firstname} {$part->lastname}</a>"; ?></td>
+						<td><?php echo "<a href=\"/admin/participants/{$part->id}\">{$part->firstname} {$part->lastname}</a>". ($part->money ? "<sup>{$part->money}</sup>" : ""); ?></td>
 						<!-- <td><?php ?></td> -->
 					</tr>
 				<?php endforeach; ?>
