@@ -31,7 +31,7 @@ try {
 		foreach($parts as $part) {
 			$p = $this->pixie->orm->get('participant',$part);
 			if($p->loaded())
-				$names[] = "<a href=\"/admin/participants/{$p->id}\">{$p->firstname} {$p->lastname}</a>". ($p->money ? "<sup>{$p->money}</sup>" : "");
+				$names[] = "<a href=\"/admin/participants/{$p->id}\">{$p->firstname} {$p->lastname}</a>". ($p->money ? "<sup>{$p->money}". ((!$order->user->grace && $this->pixie->party->getPartGrace($p)) ? ", л" : "") ."</sup>" : "");
 		}
 		if(count($names))
 			echo implode("<br/>", $names);
@@ -41,7 +41,7 @@ catch(Exception $e) {
 	echo "ошибка";
 }
 ?></td>
-			<td><?php echo "<a href=\"/admin/users/{$order->user->id}\">{$order->user->name}</a> ({$order->user->email})"; ?>
+			<td><?php echo "<a href=\"/admin/users/{$order->user->id}\">{$order->user->name}</a>". ($order->user->grace ? "<sup>л</sup>" : "") ." ({$order->user->email})"; ?>
 		</tr>
 <?php endforeach; ?>
 	</tbody>

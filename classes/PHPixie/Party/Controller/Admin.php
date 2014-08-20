@@ -35,8 +35,47 @@ class Admin extends \App\Page {
 		$parts = $this->pixie->orm->get('participant')->where('money','<',$prepay)->where('cancelled',0)->count_all();
 		$partsToday = $this->pixie->orm->get('participant')->where('money','<',$prepay)->where('created','>',date('Y-m-d 00:00:00',time()))->where('cancelled',0)->count_all();
 
-		$partsReady = $this->pixie->orm->get('participant')->where('cancelled',0)->where('money','>=',$prepay)->count_all();
+		// $partsReady = $this->pixie->orm->get('participant')->where('cancelled',0)->where('money','>=',$prepay)->count_all();
 		$partsReadyToday = $this->pixie->orm->get('participant')->where('money','>=',$prepay)->where('paydate','>',date('Y-m-d 00:00:00',time()))->where('cancelled',0)->count_all();
+		$partsReady = $this->pixie->orm->get('participant')
+			->where('cancelled',0)
+			->where(array(
+				array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+				array('or',array('approved',1)),
+				))
+			->count_all();
+
+		$partsAttend = $this->pixie->orm->get('participant')->where('attend',1)->count_all();
+
+/*
+		$partsWait = $this->pixie->orm->get('participant')
+			->where('cancelled',0)
+			->where('money','<',$this->pixie->config->get('party.periods.1.prices.prepay'))
+			->where('approved',0)
+			// ->where('accomodation', 'NOT IN', $this->pixie->db->expr('(3,4)'))
+			->find_all()->as_array();
+		$count = 0;
+		foreach($partsWait as $part) {
+			$copy = $this->pixie->orm->get('participant')->where('cancelled',0)->where('firstname',$part->firstname)->where('lastname',$part->lastname)->where('id','<>',$part->id)->count_all();
+			if($copy){
+				// print "<a href=\"/admin/participants/{$part->id}\">{$part->id}</a><br/>\n";
+				continue;
+			}
+			$orders = $part->user->orders->order_by('datecreated','desc')->find_all()->as_array();
+			foreach($orders as $order) {
+				$purpose = unserialize($order->purpose);
+				if(in_array($part->id, $purpose)) {
+					$age = date_diff(date_create($order->datecreated), date_create('today'))->d;
+					if($age<30 && $part->user->id!=32) {
+						$count++;
+						print "<a href=\"/admin/participants/{$part->id}\">{$age}</a><br/>\n";
+						break;
+					}
+				}
+			}
+		}
+		print "таких ". $count;
+*/
 
 
 		$users = $this->pixie->orm->get('user')->count_all();
@@ -46,13 +85,25 @@ class Admin extends \App\Page {
 		$ordersToday = $this->pixie->orm->get('order')->where('datecreated','>',date('Y-m-d 00:00:00',time()))->count_all();
 		$ordersPayedToday = $this->pixie->orm->get('order')->where('payed',1)->where('datepayed','>',date('Y-m-d 00:00:00',time()))->count_all();
 
-		$ordersPayed = $this->pixie->orm->get('order')->where('payed',1)->where('balance','>',0)->find_all()->as_array();
+		$ordersPayed = $this->pixie->orm->get('order')->where('payed',1)->where('balance','>',0)->where('cash',0)->where('cancelled',0)->find_all()->as_array();
 		$payedToday = $payedTotal = 0;
 		foreach($ordersPayed as $order) {
 			$payedTotal += $order->balance;
 			if(strtotime($order->datepayed)>strtotime('today'))
 				$payedToday += $order->balance;
 		}
+
+		$ordersCash = $this->pixie->orm->get('order')->where('payed',1)->where('balance','>',0)->where('cash',1)->where('cancelled',0)->find_all()->as_array();
+		$payedCashTotal = 0;
+		foreach($ordersCash as $order)
+			$payedCashTotal += $order->balance;
+
+
+		$parts2 = $this->pixie->orm->get('participant')->where('money','>',0)->find_all();
+		$this->page['totalMoney'] = 0;
+		foreach($parts2 as $part)
+			$this->page['totalMoney'] += $part->money;
+
 
 		$logs = $this->pixie->orm->get('log')->count_all();
 		$logsToday = $this->pixie->orm->get('log')->where('created','>',date('Y-m-d 00:00:00',time()))->count_all();
@@ -70,11 +121,27 @@ class Admin extends \App\Page {
 		$this->page['ordersPayed'] = count($ordersPayed);
 		$this->page['ordersPayedToday'] = $ordersPayedToday;
 		$this->page['payedTotal'] = $payedTotal;
-		$this->page['payedTotalShort'] = floor($payedTotal/1000) ."<small>". ($payedTotal % 1000) ."</small>";
+		$this->page['payedTotalShort'] = floor($payedTotal/1000) ."<small>". sprintf("%03d",$payedTotal % 1000) ."</small>";
 		$this->page['payedToday'] = $payedToday;
+		$this->page['partsAttend'] = $partsAttend;
+		$this->page['payedCashTotalShort'] = floor($payedCashTotal/1000) ."<small>". sprintf("%03d",$payedCashTotal % 1000) ."</small>";
 
-		$this->page['countMen'] = $this->pixie->orm->get('participant')->where('cancelled',0)->where('money','>=',$prepay)->where('gender',1)->count_all();
-		$this->page['countWomen'] = $this->pixie->orm->get('participant')->where('cancelled',0)->where('money','>=',$prepay)->where('gender',2)->count_all();
+		$settled = $this->pixie->party->getSettlementProgress();
+		$this->page['settled'] = $settled[0];
+
+		$countMen = $this->pixie->orm->get('participant')
+			->where('cancelled',0)
+			->where('gender',1)
+			->where(array(
+				array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+				array('or',array('approved',1)),
+				))
+			->count_all();
+		$this->page['percentMen'] = round($countMen/$partsReady*100);
+
+		$bd = $this->pixie->party->getBirthdays();
+		$this->page['birthdays'] = count($bd);
+
 
 
 		$this->page['comments'] = $this->pixie->orm->get('participant')->where('comment','<>','')->order_by('created','desc')->where('cancelled',0)->find_all()->as_array();
@@ -94,7 +161,7 @@ class Admin extends \App\Page {
 					$history1[$date]['partsCreated'] = 0;
 				$history1[$date]['partsCreated']++;
 			}
-			if($part->paydate>0 && $part->money) {
+			if(/*$part->paydate>0 && */$part->money) {
 				$date = $statFormatter->format(new \DateTime($part->paydate));
 				if(!isset($history1[$date]['partsPayed']))
 					$history1[$date]['partsPayed'] = 0;
@@ -119,24 +186,36 @@ class Admin extends \App\Page {
 		element: 'morris-area-chart1',
 		data: [";
 
+		$partsCreated = $partsPayed = 0;
 		foreach($history1 as $date=>$value) {
+			if(!$date)
+				continue;
 			$this->page['script'] .= "{\nperiod: '{$date}',\n";
 			if(!isset($value['partsCreated']))
 				$value['partsCreated'] = 'null';
 			if(!isset($value['partsPayed']))
 				$value['partsPayed'] = 'null';
-			$this->page['script'] .= "created: {$value['partsCreated']},\n";
-			$this->page['script'] .= "payed: {$value['partsPayed']},\n";
+			// $this->page['script'] .= "created: {$value['partsCreated']},\n";
+			// $this->page['script'] .= "payed: {$value['partsPayed']},\n";
+			$partsCreated += $value['partsCreated'];
+			$partsPayed += $value['partsPayed'];
+			$this->page['script'] .= "created: ". ($partsCreated-$partsPayed) .",\n";
+			$this->page['script'] .= "payed: {$partsPayed},\n";
 			$this->page['script'] .= "},\n";
 		}
+
+
+		if(strtotime('today')>strtotime($this->pixie->config->get('party.periods.1.lastday')))
+			$events = "events: ['". $this->pixie->config->get('party.periods.1.lastday') ."'],\n";
+		else
+			$events = "";
 
 		$this->page['script'] .= "
 ],
 		xkey: 'period',
-		ykeys: ['payed', 'created'],
-		labels: ['оплатили', 'добавились'],
-		//events: ['". $this->pixie->config->get('party.periods.1.lastday') ."'],
-		pointSize: 2,
+		ykeys: ['created','payed'],
+		labels: ['без предоплаты', 'с предоплатой'],
+		{$events}pointSize: 2,
 		hideHover: 'auto',
 		resize: true
 	});
@@ -161,8 +240,7 @@ class Admin extends \App\Page {
 		xkey: 'period',
 		ykeys: ['money'],
 		labels: ['получено средств'],
-		//events: ['". $this->pixie->config->get('party.periods.1.lastday') ."'],
-		pointSize: 2,
+		{$events}pointSize: 2,
 		postUnits: 'k',
 		hideHover: 'auto',
 		resize: true
@@ -173,9 +251,32 @@ class Admin extends \App\Page {
 
 
 
-
-
-
+/*
+	// Одноразовое конвертирование
+	public function action_newdays() {
+		$parts = $this->pixie->orm->get('participant')->find_all();
+		foreach($parts as $part) {
+			switch($part->days) {
+				case 4:
+					$days = array(1,1,1,1);
+					break;
+				case 3:
+					$days = array(0,1,1,1);
+					break;
+				case 2:
+					$days = array(0,0,1,1);
+					break;
+				case 1:
+					$days = array(0,0,0,1);
+					break;
+				default:
+					$days = array(0,0,0,0);
+			}
+			$part->dayslist = serialize($days);
+			$part->save();
+		}
+	}
+*/
 
 	public function action_comments() {
 		$this->page['title'] = 'Комментарии участников';
@@ -193,6 +294,8 @@ class Admin extends \App\Page {
 		$this->page['title'] = "Исправление сведений в неверном формате";
 		$this->page['subview'] = "admin-repair";
 
+		$confirm = $this->request->post('action')=='confirm' ? true : false;
+
 		$parts = $this->pixie->orm->get('participant')->where('cancelled',0)->find_all()->as_array();
 
 		// Хранилище для списка кандидатов на исправление.
@@ -205,15 +308,34 @@ class Admin extends \App\Page {
 		foreach($parts as $part) {
 			if($part->phone) {
 				$phone = $part->phone;
-				$phone = preg_replace("/^(79\d{2}[\-\s]?\d{3}[\-\s]?\d{2}[\-\s]?\d{2})$/", "+$1", $phone);
-				$phone = preg_replace("/^(9\d{2}[\-\s]?\d{3}[\-\s]?\d{2}[\-\s]?\d{2})$/", "+7$1", $phone);
-				$phone = preg_replace("/^8[\-\s\(]?9/", "+7-9", $phone);
-				$phone = $this->phone($phone);
 
-				if($phone != $part->phone)
-					$this->page['candidates']['phones'][] = array($part->phone, $phone);
+				$phones = array();
+				if(strpos($phone, ',')!==false)
+					$phones = explode(',', $phone);
+				else if(strpos($phone, ';')!==false)
+					$phones = explode(';', $phone);
+				else if(preg_match("/([\S]{11,})[\s]([\S]{11,})/", $phone, $match))
+					$phones = array($match[1], $match[2]);
+				else
+					$phones[] = $phone;
 
-				// $part->save();
+				foreach($phones as $key => $p) {
+					$p = trim($p);
+					$p = preg_replace("/[\D]/", "", $p);
+					$p = preg_replace("/^[78](9[\d]{9})$/", "+7$1", $p);
+					$p = preg_replace("/^(9[\d]{9})$/", "+7$1", $p);
+					$p = preg_replace("/^(38[\d]+)$/", "+$1", $p);
+					$phones[$key] = $this->phone($p);
+				}
+				$phone = implode(', ', $phones);
+
+				if($phone != $part->phone) {
+					$this->page['candidates']['phones'][] = array($part->id, $part->phone, $phone);
+					if($confirm) {
+						$part->phone = $phone;
+						$part->save();
+					}
+				}
 			}
 			if($part->website) {
 				$website = $part->website;
@@ -223,14 +345,18 @@ class Admin extends \App\Page {
 				$website = preg_replace("/http\:\/\/vk\.com/", "https://vk.com", $website);
 				$website = preg_replace("/vk\.com\/[\w]*#([\w]*)/", "vk.com$2", $website);
 
-				if($website != $part->website)
-					$this->page['candidates']['websites'][] = array($part->website, $website);
-
-				// $part->save();
-
+				if($website != $part->website) {
+					$this->page['candidates']['websites'][] = array($part->id, $part->website, $website);
+					if($confirm) {
+						$part->website = $website;
+						$part->save();
+					}
+				}
 			}
 		}
 
+		if($confirm)
+			$this->redirect('/admin/repair');
 	}
 
 
@@ -335,10 +461,207 @@ class Admin extends \App\Page {
 
 
 	public function action_houses() {
-		$this->page['title'] = "Места для расселения";
-		$this->page['content'] = "Скоро";
-		$this->page['subview'] = "admin-houses";
-		$this->page['houses'] = $this->pixie->orm->get('house')->find_all()->as_array();
+		$param1 = $this->request->param('param1');
+		if(is_numeric($param1)) {
+			$house = $this->pixie->orm->get('house',(int)$param1);
+			if(!$house->loaded())
+				throw new \PHPixie\Exception\PageNotFound;
+
+			$this->page['house'] = $house;
+			$this->page['title'] = $house->name;
+
+			if($this->request->param('param2')=='edit') {
+				// Выдаём форму редактирования дома
+				if($this->request->method != 'POST') {
+					$this->page['title'] .= " <a href=\"/admin/houses/{$house->id}\" role=\"button\" class=\"btn btn-default\"><i class=\"fa fa-eye\"></i></a>";
+					$this->page['subview'] = "admin-house-edit";
+				}
+				// Сохраняем изменения, переданные через форму
+				else {
+					$fields = $house->columns();
+					$post = $this->request->post();
+					$changes = array();
+					foreach($fields as $field) {
+						// не учитываем эти поля - их в форме не будет
+						if($field=='id' || $field=='coord')
+							continue;
+						// просто разные обозначения поставленных галочек - пропускаем
+						if($house->$field==1 && isset($post[$field]) && $post[$field]=='on')
+							continue;
+
+						if(isset($post[$field]) && $house->$field != $post[$field]) {
+							if($house->$field==0 && $post[$field]=='on')
+								$post[$field] = 1;
+							$changes[] = "{$field}: {$house->$field}=>{$post[$field]}";
+							$house->$field = $post[$field];
+						}
+
+						if($house->$field==1 && !isset($post[$field])) {
+							$changes[] = "{$field}: 1=>0";
+							$house->$field = 0;
+						}
+					}
+					// на память в лог
+					$log = $this->pixie->orm->get('log');
+					$log->type = 8;
+					$log->author = $this->pixie->auth->user()->id;
+					$log->id1 = $house->id;
+					$log->message = "Дом {$house->name} отредактирован (". implode("; ",$changes) .")";
+					$log->save();
+
+					$house->save();
+					$this->redirect("/admin/houses/". $house->id);
+				}
+			}
+			else {
+				$this->page['title'] .= " <a href=\"/admin/houses/{$house->id}/edit\" role=\"button\" class=\"btn btn-default\"><i class=\"fa fa-wrench\"></i></a>";
+				$this->page['subview'] = "admin-house";
+			}
+		}
+		else if($param1=='export') {
+			$formatterShort = new \IntlDateFormatter('ru_RU', \IntlDateFormatter::FULL, \IntlDateFormatter::FULL);
+			$formatterShort->setPattern("d MMMM");
+
+			$this->view = $this->pixie->view('admin3');
+			$this->page['title'] = "Итоги расселения на ". $formatterShort->format(new \DateTime('now'));
+			$this->page['subview'] = "admin-houses-export";
+			$this->page['list'] = array();
+			$this->page['ready'] = $this->pixie->party->getSettlementProgress();
+
+			$houses = $this->pixie->orm->get('house')->order_by('church','asc')->order_by('name','asc')->find_all()->as_array();
+			$transportOptions = $this->pixie->config->get('party.userfields.transport.options');
+			foreach($houses as $house) {
+				if($house->participants->where('cancelled',0)->count_all()) {
+					$houseList = array(
+						'id' => $house->id,
+						'name' => $house->name,
+						'church' => $house->church,
+						'phone' => $house->phone,
+						'district' => $house->district,
+						'meeting' => $house->meeting,
+						'transport' => $house->transport,
+						'guests' => array(),
+						);
+					$parts = $house->participants->where('cancelled',0)->find_all()->as_array();
+					foreach($parts as $item) {
+						$age = date_diff(date_create($item->birthday), date_create('now'))->y;
+						if(!$age || $age>100)
+							$age = "<i class=\"fa fa-question-circle\"></i>";
+						$houseList['guests'][] = array(
+							'id' => $item->id,
+							'name' => $item->firstname .' '. $item->lastname,
+							'age' => $age,
+							'days' => $item->days,
+							'transport' => isset($transportOptions[$item->transport]) ? $transportOptions[$item->transport] : "<i class=\"fa fa-question-circle text-muted\"></i>",
+							'city' => $item->city,
+							'phone' => $item->phone,
+							'email' => $item->email,
+							'attend' => $item->attend,
+							);
+					}
+					empty($house->church)
+						? $this->page['list']['nochurch'][] = $houseList
+						: $this->page['list'][$house->church][] = $houseList;
+				}
+			}
+		}
+		else if($param1=='hosts') {
+			$this->view = $this->pixie->view('admin3');
+			$this->page['title'] = 'Гостеприимные дома';
+			$houses = $this->pixie->orm->get('house')->order_by('church','asc')->find_all();
+			
+			$housesByChurch = array();
+			$this->page['content'] = "<p>Список гостеприимных домов для расселения участников ". $this->pixie->config->get('party.event.title') ."</p>\n";
+
+			foreach($houses as $house) {
+				if($house->church)
+					$housesByChurch[$house->church][] = $house;
+				else
+					$housesByChurch['Остальные'][] = $house;
+			}
+
+			foreach($housesByChurch as $title=>$church) {
+				$this->page['content'] .= "<div class=\"panel panel-default\">\n<div class=\"panel-heading\"><h4 class=\"text-center\">{$title}</h4></div>\n<table class=\"table\">\n";//<ul class=\"list-group\">\n";
+				foreach($church as $key=>$house) {
+					if(!$house->places1 && !$house->places2 && !$house->places3 && !$house->places4)
+						continue;
+					$this->page['content'] .= "<tr>\n";
+					$this->page['content'] .= "<td>". ($key+1) ."</td>\n";
+					$this->page['content'] .= "<td>{$house->name}</td>\n";
+					$this->page['content'] .= "<td>{$house->phone}</td>\n";
+					$this->page['content'] .= "</tr>\n";
+				}
+				$this->page['content'] .= "</table>\n</div>\n";
+			}
+		}
+		else if($param1=='printcards') {
+			$this->view = $this->pixie->view('admin3');
+			$this->page['title'] = 'Гостеприимные дома';
+			$houses = $this->pixie->orm->get('house')->where(array(
+					array('places1','>',0),
+					array('or',array('places2','>',0)),
+					array('or',array('places3','>',0)),
+					array('or',array('places4','>',0)),
+				))->find_all();
+			// $this->page['content'] = "<table class=\"table\">\n";
+			// foreach($houses as $key=>$house) {
+			// 	if(!($key % 2))
+			// 		$this->page['content'] .= "<tr>\n";
+			// 	$this->page['content'] .= "<td><div class=\"pull-right label label-default\">{$house->id}</div>{$house->name}</td>\n";
+			// 	if($key % 2)
+			// 		$this->page['content'] .= "</tr>\n";
+			// }
+			// $this->page['content'] .= "</table>\n";
+
+			$this->page['content'] = "<div class=\"container container-house-card\">\n<div class=\"row\">\n";
+			foreach($houses as $key=>$house) {
+				$this->page['content'] .= "<div class=\"col-xs-6 house-card\">\n";
+				$this->page['content'] .= "<h4 class=\"text-center\">{$house->name}<div class=\"pull-right label label-default\">{$house->id}</div></h4>\n";
+				if($house->church)
+					$this->page['content'] .= "<div><i>Церковь:</i> {$house->church}</div>\n";
+				if($house->phone)
+					$this->page['content'] .= "<div><i>Телефон:</i> {$house->phone}</div>\n";
+				if($house->address)
+					$this->page['content'] .= "<div><i>Адрес:</i> {$house->city}, {$house->address}</div>\n";
+				$extra = array();
+				if($house->district)
+					$extra[] = "<i>Район:</i> {$house->district}.";
+				if($house->busstop)
+					$extra[] = "<i>Остановка:</i> {$house->busstop}.";
+				if($house->route)
+					$extra[] = "<i>Маршруты:</i> {$house->route}.";
+				if(count($extra))
+					$this->page['content'] .= "<div>". implode(" ",$extra) ."</div>\n";
+				if($house->coord) {
+					$coordHouse = explode(",",$house->coord);
+					$this->page['content'] .= "<img src=\"http://static-maps.yandex.ru/1.x/?ll={$coordHouse[1]},{$coordHouse[0]}&size=500,450&z=16&l=map&pt={$coordHouse[1]},{$coordHouse[0]},pm2rdm\" class=\"print-map\"/>";
+				}
+				$this->page['content'] .= "<div class=\"text-center\">Приветствуем участников конференции Я МОЛОДОЙ!&nbsp;2014, добро&nbsp;пожаловать в Волгоград!</div>\n";
+				$this->page['content'] .= "</div>\n";
+			}
+			$this->page['content'] .= "</div>\n</div>\n";
+
+		}
+		else {
+			$this->page['title'] = "Места для расселения";
+			$this->page['subview'] = "admin-houses-list";
+			$this->page['houses'] = $this->pixie->orm->get('house')->find_all()->as_array();
+			list($this->page['ready']) = $this->pixie->party->getSettlementProgress();
+
+			$houses = $this->pixie->orm->get('house')->find_all()->as_array();
+			$this->page['p1_total'] = $this->page['p2_total'] = $this->page['p3_total'] = $this->page['p4_total'] = $this->page['free'] = $this->page['total'] = 0;
+			foreach($houses as $place) {
+				$this->page['p1_total'] += $place->places1;
+				$this->page['p2_total'] += $place->places2;
+				$this->page['p3_total'] += $place->places3;
+				$this->page['p4_total'] += $place->places4;
+				$this->page['total'] += $place->places1 + $place->places2 + $place->places3 + $place->places4;
+				$this->page['free'] += $this->page['total'] - $place->participants->where('cancelled',0)->count_all();
+			}
+
+// print $this->page['total'] .", ". count($guests);
+
+		}
 	}
 
 
@@ -743,7 +1066,7 @@ https://vk.com/imolod14
 		else {
 			$this->page['title'] = "Список регистраторов";
 			$this->page['subview'] = "admin-users-list";
-			$this->page['users'] = $this->pixie->orm->get('user')->find_all()->as_array();
+			$this->page['users'] = $this->pixie->orm->get('user')->order_by('id','desc')->find_all()->as_array();
 		}
 	}
 
@@ -780,7 +1103,8 @@ https://vk.com/imolod14
 
 	// выводим таблицу всех участников
 	public function action_participants() {
-		if($id = $this->request->param('param1')) {
+		if(is_numeric($this->request->param('param1'))) {
+			$id = $this->request->param('param1');
 			$part = $this->pixie->orm->get('participant',$id);
 			if(!$part->loaded())
 				throw new \PHPixie\Exception\PageNotFound;
@@ -789,8 +1113,25 @@ https://vk.com/imolod14
 			$this->page['subview'] = "admin-participant";
 			$this->page['part'] = $part;
 			$this->page['partInfo'] = $this->pixie->party->providedPartInfo($part);
-			// $this->view->config = 
-
+		}
+		else if($this->request->param('param1')=='email') {
+			$this->page['title'] = 'Список Email из всех анкет и пользователей';
+			$this->page['content'] = "";
+			$results = array();
+			$list = $this->pixie->orm->get('user')->find_all();
+			foreach($list as $item)
+				if($item->email)
+					$results[] = trim(strtolower($item->email));
+			$list = $this->pixie->orm->get('participant')->where('email','<>','')->find_all();
+			foreach($list as $item)
+				if($item->email)
+					$results[] = trim(strtolower($item->email));
+			$results = array_unique($results);
+			sort($results);
+			$this->page['content'] .= "<div>Найдено ". count($results) . $this->pixie->party->declension(count($results),array(" различный адрес"," различных адреса"," различных адресов")) .":</div>\n<ol>\n";
+			foreach($results as $item)
+				$this->page['content'] .= "<li>{$item}</li>\n";
+			$this->page['content'] .= "</ol>\n";
 		}
 		else {
 			$this->page['title'] = 'Участники';
@@ -800,14 +1141,14 @@ https://vk.com/imolod14
 			$formatter = new \IntlDateFormatter('ru_RU', \IntlDateFormatter::FULL, \IntlDateFormatter::FULL);
 			$formatter->setPattern('d MMMM');
 
-$subject_types = array(
-	array('Республика', 'респ.', 'республики', 0),
-	array('Край', 'кр.', 'края', 1),
-	array('Область', 'обл.', 'области', 1),
-	array('Автономная область', 'АО', 'автономной области', 1),
-	array('Автономный округ', 'АО', 'автономного округа', 1),
-	array('Город', 'г.', 'города', 0)
-);
+			$subject_types = array(
+				array('Республика', 'респ.', 'республики', 0),
+				array('Край', 'кр.', 'края', 1),
+				array('Область', 'обл.', 'области', 1),
+				array('Автономная область', 'АО', 'автономной области', 1),
+				array('Автономный округ', 'АО', 'автономного округа', 1),
+				array('Город', 'г.', 'города', 0)
+			);
 
 			foreach($parts as $part) {
 				$check = $this->pixie->party->getSumToPay($part);
@@ -847,15 +1188,143 @@ $subject_types = array(
 					'город' => $part->city,
 					'регион' => $part->region->name .($part->region->suffix && $part->region->type ? ' '. $subject_types[$part->region->type-1][1] : ''),
 					'транспорт' => array($part->transport, $transport),
+					'прибыл' => array($part->attend, $part->attend ? "<i class=\"fa fa-check\"></i>" : ""),
 				);
 			}
 			$this->page['subview'] = 'admin-participants-list';
+
+
+			// Подсчёты количества людей по питанию
+			$partsMeal = $this->pixie->orm->get('participant')
+				->where('meal',1)
+				->where('cancelled',0)
+				->where(array(
+					array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+					array('or',array('approved',1)),
+					))
+				->find_all()->as_array();
+			$daysMeal = array();
+			foreach($partsMeal as $part) {
+				if(isset($daysMeal[$part->days]))
+					$daysMeal[$part->days]++;
+				else
+					$daysMeal[$part->days] = 1;
+			}
+			$this->page['partsMeal'] = count($partsMeal);
+			$this->page['daysMeal'] = $daysMeal;
+
+			// Сколько парней и девушек питаются в субботу
+			$partsSatMealMale = $this->pixie->orm->get('participant')
+				->where('meal',1)
+				->where('cancelled',0)
+				->where('days','>',1)
+				->where('gender',1)
+				->where(array(
+					array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+					array('or',array('approved',1)),
+					))
+				->count_all();
+			$partsSatMealFemale = $this->pixie->orm->get('participant')
+				->where('meal',1)
+				->where('cancelled',0)
+				->where('days','>',1)
+				->where('gender',2)
+				->where(array(
+					array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+					array('or',array('approved',1)),
+					))
+				->count_all();
+			$this->page['partsSatMealMale'] = $partsSatMealMale;
+			$this->page['partsSatMealFemale'] = $partsSatMealFemale;
 		}
 	}
 
 
 
 
+
+
+
+	public function action_meetings() {
+		$this->page['title'] = 'Список прибывающих';
+
+		$parts = $this->pixie->orm->get('participant')
+			->where('cancelled',0)
+			->where('city','NOT IN', $this->pixie->db->expr('("Волгоград","Волжский")'))
+			->where('transport', 'IN', $this->pixie->db->expr('(1,2,4)'))
+			->where(array(
+				array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+				array('or',array('approved',1)),
+				))
+			->order_by('transport','asc')
+			->order_by('created','asc')
+			->find_all()->as_array();
+
+		$waiting = $this->request->param('param1');
+		// Нужно ли добавлять ещё тех, от кого оплата задерживается?
+		if($waiting) {
+			if(!is_numeric($waiting))
+				$waiting = 5;
+			$partsWait = $this->pixie->orm->get('participant')
+				->where('cancelled',0)
+				->where('money','<',$this->pixie->config->get('party.periods.1.prices.prepay'))
+				->where('transport', 'IN', $this->pixie->db->expr('(1,2,4)'))
+				->where('approved',0)
+				->find_all()->as_array();
+			foreach($partsWait as $part) {
+				// Пропускаем дубликаты
+				$copy = $this->pixie->orm->get('participant')->where('cancelled',0)->where('firstname',$part->firstname)->where('lastname',$part->lastname)->where('id','<>',$part->id)->count_all();
+				if($copy)
+					continue;
+				// Ищем анкеты с платежами
+				$orders = $part->user->orders->order_by('datecreated','desc')->find_all()->as_array();
+				foreach($orders as $order) {
+					$purpose = unserialize($order->purpose);
+					if(in_array($part->id, $purpose)) {
+						$age = date_diff(date_create($order->datecreated), date_create('today'))->d;
+						if($age<$waiting && $part->user->id!=32) {
+							$parts[] = $part;
+							break;
+						}
+					}
+				}
+			}
+		}
+
+		$this->page['content'] = "Всего: ". count($parts) ."<br/>\n";
+		$transport = $this->pixie->config->get('party.userfields.transport.options');
+
+		foreach($parts as $part) {
+			$age = date_diff(date_create($part->birthday), date_create('now'))->y;
+			$this->page['content'] .= "<a href=\"/admin/participants/{$part->id}\">{$part->firstname} {$part->lastname}</a>".
+				(($age>0 && $age<150) ? " ({$age})" : "") .
+				"<br/>\n".
+				($part->phone ? $part->phone ."<br/>\n" : "") .
+				($part->email ? $part->email ."<br/>\n" : "") .
+				($part->website ? "<a href=\"{$part->website}\">{$part->website}</a><br/>\n" : "") .
+				($part->city ? $part->city ."<br/>\n" : "") .
+				($part->transport ? "прибытие: <strong>{$transport[$part->transport]}</strong><br/>\n" : "") .
+				($part->comment ? $part->comment ."<br/>\n" : "") .
+				($part->house->loaded() ? "проживание: ". $part->house->name ."<br/>\n" : "") .
+				"<br/>\n";
+		}
+	}
+
+
+
+
+
+
+	public function action_birthdays() {
+		$formatterShort = new \IntlDateFormatter('ru_RU', \IntlDateFormatter::FULL, \IntlDateFormatter::FULL);
+		$formatterShort->setPattern("d MMMM");
+		$birthdays = $this->pixie->party->getBirthdays();
+
+		$this->page['title'] = 'Именинники';
+		$this->page['content'] = "";
+		foreach($birthdays as $birthday)
+			$this->page['content'] .= $formatterShort->format(new \DateTime($birthday['date'])) ." &mdash; {$birthday['name']} {$birthday['age']} ". $this->pixie->party->declension($birthday['age'],array('год','года','лет')) ."<br/>\n";
+	}
 
 
 
@@ -917,7 +1386,7 @@ $subject_types = array(
 					$moneyGot += $part->money;
 			}
 			if($moneyGot != $order->balance) {
-				$this->page['content'] .= "{$order->id}: {$order->balance} => {$moneyGot}<br/>\n";
+				$this->page['content'] .= "<a href=\"/admin/users/{$order->user->id}\">{$order->id}</a>: {$order->balance} => {$moneyGot}<br/>\n";
 				$bugs++;
 			}
 		}
@@ -936,7 +1405,7 @@ $subject_types = array(
 					$p += count($order->purpose);
 				}
 			}
-			if($moneyPaid/$p != $part->money) {
+			if($p && $moneyPaid/$p != $part->money) {
 				$this->page['content'] .= "{$part->firstname} {$part->lastname}: {$part->money} => {$moneyPaid} [". implode("; ",$history) ."]<br/>\n";
 				$bugs++;
 			}
@@ -949,8 +1418,71 @@ $subject_types = array(
 
 	}
 
+	public function action_cash() {
+		$this->page['title'] = 'Наличные';
+		$this->page['content'] = "";
+
+		$orders = $this->pixie->orm->get('order')->where('cash',1)->where('cancelled',0)->where('payed',1)->find_all()->as_array();
+		$users = array();
+		foreach($orders as $order) {
+			if(!isset($users[$order->user->id]['sum']))
+				$users[$order->user->id]['sum'] = 0;
+			if(!isset($users[$order->user->id]['orders']))
+				$users[$order->user->id]['orders'] = array();
+			if(!isset($users[$order->user->id]['name']))
+				$users[$order->user->id]['name'] = $order->user->name;
+			$users[$order->user->id]['sum'] += $order->balance;
+			$purpose = unserialize($order->purpose);
+			$part = $this->pixie->orm->get('participant',reset($purpose));
+			$purpose = $part->loaded()
+				? $part->firstname .' '. $part->lastname
+				: "?";
+			$users[$order->user->id]['orders'][] = array(
+				$order->datepayed,
+				$purpose,
+				$part->id,
+				$order->balance,
+				$order->id,
+				);
+		}
+		foreach($users as $id=>$user) {
+			$this->page['content'] .= "<h4><a href=\"/admin/users/{$id}\">{$user['name']}</a>: {$user['sum']}</h4>\n<table class=\"table\">\n";
+			foreach($user['orders'] as $order)
+				$this->page['content'] .= "<tr><td>{$order[0]}</td><td><a href=\"/admin/participants/{$order[2]}\">{$order[1]}</a></td><td>{$order[3]}</td>". ($this->pixie->auth->user()->id==32 ? "<td><button class=\"btn btn-default btn-xs payment-cancel\" data-orderid=\"{$order[4]}\"><i class=\"fa fa-times\"></i></button></td>" : "") ."</tr>\n";
+			$this->page['content'] .= "</table>\n";
+		}
+	}
 
 
+	public function action_hello() {
+		// $param1 = $this->request->param('param1');
+		$param1 = $this->request->post('id');
+		if(is_numeric($param1)) {
+			$part = $this->pixie->orm->get('participant',$param1);
+			if($part->loaded()) {
+				$this->view = $this->pixie->view('admin-clear');
+				// $this->page['subview'] = 'admin-participant-hello';
+				// $this->view->part = $part;
+				$this->view->subview = "admin-participant";
+				$this->page['part'] = $part;
+				$this->page['partInfo'] = $this->pixie->party->providedPartInfo($part);
+				// $this->view->page = $this->page;
+			}
+			else
+				throw new \PHPixie\Exception\PageNotFound;
+		}
+		else {
+			$this->page['title'] = 'Приветствие';
+			$this->page['content'] =<<<EOF
+<div id="hello">
+<input type="text" class="typeahead form-control input-lg" placeholder="Фамилия или имя"/>
+</div>
+<div id="hello-wrapper"></div>
+
+EOF;
+			$this->page['scripts'] = array("/scripts/typeahead.bundle.min.js");
+		}
+	}
 
 
 

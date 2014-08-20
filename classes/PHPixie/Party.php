@@ -46,31 +46,47 @@ Class Party {
 		$sumPaid = $sumPrepay = $sumBasic = $sumMeal = $countMeal = $needToPrepay = $needToFull = 0;
 		foreach($parts as $part) {
 			// Учитываем, действует ли льготный период для каждого участника
-/*
-			// более простой, но устаревший вариант, не учитывающий платежи
-			if($part->grace
-				|| $part->user->grace
-				|| ($part->paydate && strtotime($part->paydate) < strtotime($gracePeriod['lastday'] ." +1 day"))
-				)
-				$partPeriod = $gracePeriod;
-			else
-				$partPeriod = $curPeriod;
-*/
+
 			if($this->getPartGrace($part/*, $this->pixie->auth->user()->role=='admin' ? "Today +2 day" : "Today")*/))
 				$partPeriod = $gracePeriod;
-			else
-				$partPeriod = $curPeriod;
+			else {
+				if($part->paydate)
+					$partPeriod = $this->getCurrentPeriod($part->paydate);
+				// если неудачные попытки платежа засчитывать как успевание в срок
+				else if($graceExtraPeriod = $this->getPartPayPeriod($part))
+					$partPeriod = $graceExtraPeriod;
+				else {
+					$lastPeriod = end($periods);
+					if($part->approved && $curPeriod==$lastPeriod)
+						$partPeriod = prev($periods);
+					else
+						$partPeriod = $curPeriod;
+				}
+			}
+// print_r($partPeriod);
+
 
 			$sumPrepay += $partPeriod['prices']['prepay'];
 			$sumBasic += $partPeriod['prices']['basic'];
 			$toPay[$part->id]['prepay'] = $partPeriod['prices']['prepay'];
 			$toPay[$part->id]['full'] = $partPeriod['prices']['basic'];
-			if($part->meal && isset($partPeriod['prices']['daysmeal'][$part->days])) {
+			// Подсчёт стоимости питания за выбранные дни
+			if($part->meal) {
 				$countMeal++;
-				$sumMeal += $partPeriod['prices']['daysmeal'][$part->days];
-				$toPay[$part->id]['full'] += $partPeriod['prices']['daysmeal'][$part->days];
+				$dayslist = unserialize($part->dayslist);
+				if(is_array($dayslist) && count($dayslist)) {
+					foreach($dayslist as $key=>$value) {
+						if($value) {
+							$sumMeal += $partPeriod['prices']['mealbyday'][$key];
+							$toPay[$part->id]['full'] += $partPeriod['prices']['mealbyday'][$key];
+						}
+					}
+				}
 			}
 
+// if($this->pixie->auth->user()->role=='admin') {
+// 	print $sumMeal;
+// }
 			// сколько денег уже заплачено за участника
 			$sumPaid += $part->money;
 
@@ -229,10 +245,20 @@ Class Party {
 	public function getCurrentPeriod($day="Today") {
 		$periods = $this->pixie->config->get("party.periods");
 
+		// Округляем дату-время до одной даты
+		if($day!="Today")
+			$day = date('Y-m-d',strtotime($day));
+
 		$result = array();
 		foreach($periods as $period) {
-			if(strtotime($period['lastday'])>=strtotime($day) && (empty($result) || strtotime($period['lastday'])<strtotime($result['lastday'])))
+			if(strtotime($period['lastday'])>=strtotime($day) &&
+				(empty($result) || strtotime($period['lastday'])<strtotime($result['lastday'])))
 				$result = $period;
+
+			// if(strtotime($period['lastday'])>=strtotime($day)) {
+			// 	$result = $period;
+			// 	break;
+			// }
 		}
 		return !empty($result) ? $result : false;
 	}
@@ -490,6 +516,154 @@ $part->money += $sumToPay['toPay'][$part->id]['full'];
 	}
 
 
+
+
+	// Узнаём, применима ли дополнительная льгота из-за неполадок при платежах
+	public function getPartPayPeriod(&$part) {
+		if(is_numeric($part)) {
+			$part = $this->pixie->orm->get('participant',$part);
+			if(!$part->loaded())
+				return false;
+		}
+
+		$periods = $this->pixie->config->get("party.periods");
+		$gracePeriod = reset($periods);
+		$numPeriods = array_keys($periods);
+
+		// Находим самый ранний платёж, даже несостоявшийся
+		$orders = $part->user->orders->find_all();
+		foreach($orders as $order) {
+			$purpose = unserialize($order->purpose);
+			if(in_array($part->id, $purpose)) {
+				$candidates = array();
+				foreach($periods as $key=>$period) {
+					if($key!=1 && strtotime($order->datecreated) < strtotime($period['lastday'] ." +1 day")) {
+						$candidates[] = $key;
+						break;
+					}
+				}
+				$result = max($candidates);
+
+				if(end($numPeriods)==$result && $part->approved)
+					$result--;
+				return $periods[$result];
+			}
+		}
+		return false;
+	}
+
+
+
+
+	// Возвращает статус процесса расселения в массиве:
+	// 0 => процент расселённых участников из тех, которые нуждающихся в нём
+	// 1 => число расселённых участников
+	// 2 => число нуждающихся в нём участников
+	// 3 => число занятых домов
+	public function getSettlementProgress($waiting=true) {
+		$guests = $this->pixie->orm->get('participant')
+			->where('cancelled',0)
+			->where('accomodation', 'NOT IN', $this->pixie->db->expr('(3,4)'))
+			->where(array(
+				array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+				array('or',array('approved',1)),
+				))
+			->find_all()->as_array();
+
+		// Нужно ли добавлять ещё тех, от кого оплата задерживается?
+		if($waiting) {
+			if(!is_numeric($waiting))
+				$waiting = 5;
+			$partsWait = $this->pixie->orm->get('participant')
+				->where('cancelled',0)
+				->where('money','<',$this->pixie->config->get('party.periods.1.prices.prepay'))
+				->where('accomodation', 'NOT IN', $this->pixie->db->expr('(3,4)'))
+				->where('approved',0)
+				->find_all()->as_array();
+			foreach($partsWait as $part) {
+				// Пропускаем дубликаты
+				$copy = $this->pixie->orm->get('participant')->where('cancelled',0)->where('firstname',$part->firstname)->where('lastname',$part->lastname)->where('id','<>',$part->id)->count_all();
+				if($copy)
+					continue;
+				// Ищем анкеты с платежами
+				$orders = $part->user->orders->order_by('datecreated','desc')->find_all()->as_array();
+				foreach($orders as $order) {
+					$purpose = unserialize($order->purpose);
+					if(in_array($part->id, $purpose)) {
+						$age = date_diff(date_create($order->datecreated), date_create('today'))->d;
+						if($age<$waiting && $part->user->id!=32) {
+							$guests[] = $part;
+							break;
+						}
+					}
+				}
+			}
+		}
+
+
+		$settled = 0;
+		$houses = array();
+		foreach($guests as $guest)
+			if($guest->house->loaded()) {
+				$settled++;
+				$houses[] = $guest->house->id;
+			}
+		$houses = array_unique($houses);
+		return array(
+			round(($settled / count($guests))*100),
+			$settled,
+			count($guests),
+			count($houses),
+			);
+	}
+
+
+
+
+	public function getBirthdays() {
+		$date_start = $this->pixie->config->get('party.event.date_start');
+		$date_end = $this->pixie->config->get('party.event.date_end');
+		$parts = $this->pixie->orm->get('participant')->where('cancelled',0)->find_all()->as_array();
+		$dsy = date('Y-',strtotime($date_start));
+		$dey = date('Y-',strtotime($date_end));
+		$results = array();
+		$resultSort = array();
+		foreach($parts as $part) {
+			$userbd = date('m-d',strtotime($part->birthday));
+			if(strtotime($dsy . $userbd)>=strtotime($date_start) && strtotime($dsy . $userbd)<=strtotime($date_end) || strtotime($dey . $userbd)>=strtotime($date_start) && strtotime($dey . $userbd)<=strtotime($date_end)) {
+				if(strtotime($dsy . $userbd)>=strtotime($date_start) && strtotime($dsy . $userbd)<=strtotime($date_end)) {
+					$age = date_diff(date_create($part->birthday), date_create($date_end))->y;
+					$results[] = array(
+						'age' => $age,
+						'date' => $dsy . $userbd,
+						'name' => "<a href=\"/admin/participants/{$part->id}\">{$part->firstname} {$part->lastname}</a>",
+						);
+					$resultSort[] = $dsy . $userbd;
+				}
+			}
+		}
+		array_multisort($resultSort, $results);
+		return $results;
+	}
+
+
+
+
+	public function log($type, $comment, $id1=false, $id2=false) {
+		$log = $this->pixie->orm->get('log');
+		$log->type = $type;
+		$log->author = $this->pixie->auth->user()->id;
+		if($id1)
+			$log->id1 = $id1;
+		if($id2)
+			$log->id2 = $id2;
+		$log->message = $comment;
+		$log->save();
+		return true;
+	}
+
+
+
 	public function daysLeft($human = true) {
 		$result = (strtotime($this->pixie->config->get('party.event.date_start')) - strtotime('today')) / 86400;
 		if($human)
@@ -514,6 +688,60 @@ $part->money += $sumToPay['toPay'][$part->id]['full'];
 			else
 				return $expr[2];
 		}
+	}
+
+
+
+
+	public function makeWebsiteLink($str) {
+		$match = array();
+		if(preg_match("/^(https?\:\/\/)?(www\.)?([\w-\.]+)(\/(.+))?$/", $str, $match)) {
+			switch($match[3]) {
+				case 'vk.com':
+					$icon = "vk";
+					break;
+				case 'facebook.com':
+					$icon = "facebook-square";
+					break;
+				case 'twitter.com':
+					$icon = "twitter";
+					break;
+				default:
+					$icon = "external-link";
+			}
+			return "<i class=\"fa fa-{$icon} fa-fw\"></i> <a href=\"http://{$match[3]}{$match[4]}\" target=\"_blank\">". ($icon=="external-link" ? $match[3].$match[4] : $match[5]) ."</a>";
+		}
+		else
+			return false;
+	}
+
+
+
+	/**
+	 * Calculates the great-circle distance between two points, with
+	 * the Vincenty formula.
+	 * @param float $latitudeFrom Latitude of start point in [deg decimal]
+	 * @param float $longitudeFrom Longitude of start point in [deg decimal]
+	 * @param float $latitudeTo Latitude of target point in [deg decimal]
+	 * @param float $longitudeTo Longitude of target point in [deg decimal]
+	 * @param float $earthRadius Mean earth radius in [m]
+	 * @return float Distance between points in [m] (same as earthRadius)
+	 * Нашёл здесь: http://stackoverflow.com/a/10054282
+	 */
+	public function vincentyGreatCircleDistance($latitudeFrom, $longitudeFrom, $latitudeTo, $longitudeTo, $earthRadius = 6371000) {
+		// convert from degrees to radians
+		$latFrom = deg2rad($latitudeFrom);
+		$lonFrom = deg2rad($longitudeFrom);
+		$latTo = deg2rad($latitudeTo);
+		$lonTo = deg2rad($longitudeTo);
+
+		$lonDelta = $lonTo - $lonFrom;
+		$a = pow(cos($latTo) * sin($lonDelta), 2) +
+		pow(cos($latFrom) * sin($latTo) - sin($latFrom) * cos($latTo) * cos($lonDelta), 2);
+		$b = sin($latFrom) * sin($latTo) + cos($latFrom) * cos($latTo) * cos($lonDelta);
+
+		$angle = atan2(sqrt($a), $b);
+		return $angle * $earthRadius;
 	}
 
 

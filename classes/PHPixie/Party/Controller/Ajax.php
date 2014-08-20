@@ -25,17 +25,16 @@ class Ajax extends \App\Page {
 		if($this->request->post('type')=='user') {
 			if(is_numeric($this->request->post('id'))) {
 				$user = $this->pixie->orm->get('user',$this->request->post('id'));
+				$sum = array("needToFull"=>"null");
 				if($user->loaded()) {
-					if($user->grace) {
-						$user->grace = 0;
-						$user->save();
-						die(json_encode(array("status"=>"success","result"=>"false")));
-					}
-					else {
-						$user->grace = 1;
-						$user->save();
-						die(json_encode(array("status"=>"success","result"=>"true")));
-					}
+					$user->grace = $user->grace ? 0 : 1;
+					$user->save();
+					if(is_numeric($this->request->post('part')))
+						$sum = $this->pixie->party->getSumToPay($this->request->post('part'));
+
+					$this->pixie->party->log(8,"Для {$user->name} в". ($user->grace ? "" : "ы") ."ключена льгота",$user->id,$user->grace);
+
+					die(json_encode(array("status"=>"success","result"=>($user->grace ? "true" : "false"),"needtopay"=>$sum['needToFull'])));
 				}
 			}
 		}
@@ -43,24 +42,379 @@ class Ajax extends \App\Page {
 	}
 
 	public function action_houses() {
+		$formatter = new \IntlDateFormatter('ru_RU', \IntlDateFormatter::FULL, \IntlDateFormatter::FULL);
+		$formatter->setPattern("d MMMM");
+		$formatterShort = new \IntlDateFormatter('ru_RU', \IntlDateFormatter::FULL, \IntlDateFormatter::FULL);
+		$formatterShort->setPattern("d.MM");
+		$transport = array(
+			1=>"поезд",
+			2=>"самолёт",
+			3=>"машина",
+			4=>"рейс/авт",
+			5=>"церк/авт",
+			6=>"местный",
+			7=>"другое",
+			);
+
 		if($this->request->post('action')=='list') {
-			$houses = $this->pixie->orm->get('house')->find_all()->as_array();
-			$result = array();
-			foreach($houses as $item) {
-				if($item->coord)
+			$model = $this->request->post('type');
+
+			if($model=='house') {
+				$items = $this->pixie->orm->get($model)->find_all()->as_array();
+				$result = array();
+				foreach($items as $item) {
+					$places1 = $item->places1;
+					$places2 = $item->places2;
+					$places3 = $item->places3;
+					$places4 = $item->places4;
+
+					$inhabs = $item->participants->find_all()->as_array();
+					if($this->request->post('mode')=='free') {
+						// Считаем, сколько каких мест сейчас уже занято
+						foreach($inhabs as $inhab) {
+							if($inhab->gender==1 && $places1 || $inhab->gender==2 && $places2) {
+								$inhab->gender==1
+									? $places1--
+									: $places2--;
+							}
+							else if($places3)
+								$places3--;
+							else if($places4)
+								$places4--;
+						}
+						if($item->coord
+							&& ($places1+$places2+$places3+$places4))
+							$result[] = array(
+								'id' => (int)$item->id,
+								'coord' => explode(",", $item->coord),
+								'address' => trim(str_replace('"', "'", $item->address)),
+								'places1' => (int)$places1,
+								'places2' => (int)$places2,
+								'places3' => (int)$places3,
+								'places4' => (int)$places4,
+								'meeting' => (int)$item->meeting,
+								'name' => $item->name,
+								);
+					}
+					else if($this->request->post('mode')=='table') {
+						$places = array();
+						if($item->places1) $places[] = $item->places1 ."М";
+						if($item->places2) $places[] = $item->places2 ."Ж";
+						if($item->places3) $places[] = $item->places3 ."Л";
+						if($item->places4) $places[] = $item->places4 ."в";
+						$partNames = array();
+						foreach($inhabs as $part)
+							$partNames[] = "{$part->firstname} {$part->lastname}";
+						$result[] = array(
+							'id' => (int)$item->id,
+							'name' => $item->name,
+							'places' => array((int)($item->places1 + $item->places2 + $item->places3 + $item->places4), implode(' ',$places)),
+							'parts' => array(count($inhabs), implode(', ', $partNames)),
+							'phone' => array((int)($item->phone ? 1 : 0), $item->phone),
+							'meeting' => (int)$item->meeting,
+							'district' => $item->district,
+							'church' => $item->church,
+							);
+					}
+				}
+				if($this->request->post('mode')=='table')
+					die(json_encode(array("data"=>$result)));
+				else
+					die(json_encode($result));
+			}
+			else if($model=='participant') {
+				$items = $this->pixie->orm->get($model)->where('cancelled',0)->where('transport','<>',6)->where('accomodation', 'NOT IN', $this->pixie->db->expr('(3,4)'));
+
+				// Фильтр по наличию предоплаты
+				if($this->request->post('payed')=='yes')
+					$items = $items->where(array(
+						array('money','>=',$this->pixie->config->get('party.periods.1.prices.prepay')),
+						array('or',array('approved',1)),
+						));
+				else if($this->request->post('payed')=='no')
+					$items = $items->where('money','<',$this->pixie->config->get('party.periods.1.prices.prepay'));
+
+				// Фильтр по наличию расселения
+				if($this->request->post('settled')=='yes')
+					$items = $items->where(array('house_id','<>',0));
+				else if($this->request->post('settled')=='no')
+					$items = $items->where(array('house_id',0));
+
+				// Фильтр по полам
+				if($this->request->post('gender')=='male')
+					$items = $items->where('gender',1);
+				else if($this->request->post('gender')=='female')
+					$items = $items->where('gender',2);
+
+				$items = $items->find_all()->as_array();
+
+
+				$waiting = $this->request->post('waiting');
+				if($waiting) {
+					if(!is_numeric($waiting))
+						$waiting = 5;
+					$partsWait = $this->pixie->orm->get('participant')
+						->where('cancelled',0)
+						->where('money','<',$this->pixie->config->get('party.periods.1.prices.prepay'))
+						->where('accomodation', 'NOT IN', $this->pixie->db->expr('(3,4)'))
+						->where('approved',0)
+						->find_all()->as_array();
+					foreach($partsWait as $part) {
+						$orders = $part->user->orders->order_by('datecreated','desc')->find_all()->as_array();
+						foreach($orders as $order) {
+							$purpose = unserialize($order->purpose);
+							if(in_array($part->id, $purpose)) {
+								$age = date_diff(date_create($order->datecreated), date_create('today'))->d;
+								if($age<$waiting && $part->user->id!=32) {
+									// print "<a href=\"/admin/participants/{$part->id}\">{$age}</a><br/>\n";
+									$items[] = $part;
+									break;
+								}
+							}
+						}
+					}
+				}
+
+				$result = array();
+				foreach($items as $item) {
+					$age = date_diff(date_create($item->birthday), date_create('now'))->y;
+					if(!$age || $age>100)
+						$age = 0;
+					$comment = trim(str_replace('"', "'", $item->comment));
 					$result[] = array(
 						'id' => (int)$item->id,
-						'coord' => explode(",", $item->coord),
-						'address' => trim(str_replace('"', "'", $item->address)),
-						'places1' => (int)$item->places1,
-						'places2' => (int)$item->places2,
-						'places3' => (int)$item->places3,
-						'places4' => (int)$item->places4,
-						'meeting' => (int)$item->meeting,
-						'name' => $item->name,
+						'name' => array((int)$item->id, $item->firstname .' '. $item->lastname),
+						'gender' => ($item->gender==1 ? "М" : "Ж"),
+						'age' => (int)$age,
+						'region' => array(mb_substr($item->region->name,0,6,'utf-8'). "&hellip;",$item->region->name),
+						'transport' => ($item->transport ? $transport[$item->transport] : "?"),
+						'user' => (int)$item->user->id,
+						'created' => array(strtotime($item->created),$formatterShort->format(new \DateTime($item->created)),$item->money ? 1 : 0),
+						'comment' => array((int)($comment ? 1 : 0), $comment),
+						'accomodation' => $item->accomodation,
+						'attend' => $item->attend,
 						);
+				}
+				die(json_encode(array("data"=>$result)));
 			}
-			die(json_encode($result));
+		}
+		else if($this->request->post('action')=='settle') {
+			$house_id = $this->request->post('house');
+			$parts_ids = $this->request->post('parts');
+			if(is_numeric($house_id) && is_array($parts_ids) && count($parts_ids)) {
+				$house = $this->pixie->orm->get('house',$house_id);
+
+				// на всякий случай проверяем, чтобы в массиве гостей были только номера
+				foreach($parts_ids as $p)
+					if(!is_numeric($p))
+						die(json_encode(array("status"=>"error")));
+
+				$parts = $this->pixie->orm->get('participant')->where('id', 'IN', $this->pixie->db->expr('('. implode(',',$parts_ids) .')'))->find_all()->as_array();
+				if($house->loaded() && count($parts)) {
+					$places1 = $house->places1;
+					$places2 = $house->places2;
+					$places3 = $house->places3;
+					$places4 = $house->places4;
+
+					// Считаем, сколько каких мест сейчас уже занято
+					$inhabs = $house->participants->find_all()->as_array();
+					foreach($inhabs as $inhab) {
+						if($inhab->gender==1 && $places1 || $inhab->gender==2 && $places2) {
+							$inhab->gender==1
+								? $places1--
+								: $places2--;
+						}
+						else if($places3)
+							$places3--;
+						else if($places4)
+							$places4--;
+					}
+
+					// Считаем, сколько каких мест будет теперь занято
+					$parts1 = $parts2 = $parts3 = 0;
+					foreach($parts as $part)
+						$part->gender == 1
+							? $parts1++
+							: $parts2++;
+					if($parts1 > $places1)
+						$parts3 += ($parts1 - $places1);
+					if($parts2 > $places2)
+						$parts3 += ($parts2 - $places2);
+
+					// Сохраняем в базу и лог
+					if($parts3 <= ($places3 + $places4)) {
+						$parts_ids = array();
+						foreach($parts as $part) {
+							$part->add('house', $house);
+							$parts_ids[] = $part->id;
+							$this->pixie->party->log(6, "{$part->firstname} {$part->lastname} поселён к {$house->name}", $part->id, $house->id);
+						}
+						die(json_encode(array("status"=>"success")));
+					}
+				}
+			}
+		}
+		// Выселение участника из занимаемого им гостеприимного дома
+		else if($this->request->post('action')=='moveout') {
+			if(is_numeric($this->request->post('id'))) {
+				$part = $this->pixie->orm->get('participant',$this->request->post('id'));
+				$house = $part->house;
+				$part->remove('house');
+				$this->pixie->party->log(7, "{$part->firstname} {$part->lastname} выселен от {$house->name}", $part->id, $house->id);
+				die(json_encode(array("status"=>"success", "guests"=>(int)$house->participants->count_all())));
+			}
+		}
+
+	}
+
+
+	// Подтверждение участия участника
+	public function action_approve() {
+		if(is_numeric($this->request->post('id'))) {
+			$part = $this->pixie->orm->get('participant',$this->request->post('id'));
+			if($part->loaded()) {
+				$part->approved = $part->approved ? 0 : 1;
+				$part->save();
+				$this->pixie->party->log(9, ($part->approved ? "П" : "Не п") ."одтверждено участие {$part->firstname} {$part->lastname}", $part->id, $part->approved);
+				die(json_encode(array("status"=>"success","result"=>($part->approved ? "true" : "false"))));
+			}
+		}
+	}
+
+	// Подтверждение участия участника
+	public function action_attend() {
+		if(is_numeric($this->request->post('id'))) {
+			$part = $this->pixie->orm->get('participant',$this->request->post('id'));
+			if($part->loaded()) {
+				$part->attend = $part->attend ? 0 : 1;
+				$part->save();
+				$this->pixie->party->log(10, ($part->attend ? "П" : "Не п") ."рибыл". ($part->gender==1 ? "" : "а") ." {$part->firstname} {$part->lastname}", $part->id, $part->attend);
+				die(json_encode(array("status"=>"success","result"=>($part->attend ? "true" : "false"))));
+			}
+		}
+	}
+
+	// Отмена участия участника
+	public function action_cancel() {
+		if(is_numeric($this->request->post('id'))) {
+			$part = $this->pixie->orm->get('participant',$this->request->post('id'));
+			if($part->loaded()) {
+				$part->cancelled = $part->cancelled ? 0 : 1;
+				if($part->cancelled && $part->house->loaded())
+					$part->remove('house',$part->house);
+				$part->save();
+				$this->pixie->party->log(11, ($part->cancelled ? "О" : "Не о") ."тменяется {$part->firstname} {$part->lastname}", $part->id, $part->cancelled);
+				die(json_encode(array("status"=>"success","result"=>($part->cancelled ? "true" : "false"))));
+			}
+		}
+	}
+
+	// Переключение отдельного дня участия
+	public function action_days() {
+		if(is_numeric($this->request->post('id')) &&
+			is_numeric($this->request->post('day')) &&
+			is_numeric($this->request->post('state'))) {
+			$part = $this->pixie->orm->get('participant',$this->request->post('id'));
+			if($part->loaded()) {
+				$dayToggle = $this->request->post('day');
+				$days = unserialize($part->dayslist);
+				$days[$dayToggle] = (isset($days[$dayToggle]) && $days[$dayToggle]) ? 0 : 1;
+				$part->dayslist = serialize($days);
+				$part->save();
+				$this->pixie->party->log(13, "В ". ($dayToggle+1) ."-й день {$part->firstname} {$part->lastname} ". ($days[$dayToggle] ? "" : "не ") ."питается", $part->id, $dayToggle);
+
+				$check = $this->pixie->party->getSumToPay($part);
+
+				die(json_encode(array(
+					"status"=>"success",
+					"result"=>($days[$dayToggle] ? "true" : "false"),
+					"needtofull"=>$check['needToFull'],
+					"sumexcess"=>$check['sumExcess'],
+					)));
+			}
+		}
+	}
+
+
+	public function action_hello() {
+		$query = $this->request->get('query');
+		if($query)
+			$parts = $this->pixie->orm->get('participant')
+				->where('cancelled',0)
+				->where(array(
+					array('firstname','LIKE',$this->pixie->db->expr("'{$query}%'")),
+					array('or',array('lastname','LIKE',$this->pixie->db->expr("'{$query}%'"))),
+					))
+				->find_all();
+		else
+			$parts = $this->pixie->orm->get('participant')
+				->where('cancelled',0)
+				->find_all();
+		$result = array();
+		foreach($parts as $part) {
+			$result[] = array(
+				'id' => $part->id,
+				'name' => $part->firstname .' '. $part->lastname,
+				'city' => $part->city,
+				'tokens' => array(
+					$part->firstname,
+					$part->lastname,
+					$part->city,
+					),
+			);
+		}
+		die(json_encode($result));
+	}
+
+
+	public function action_payment() {
+		if(is_numeric($this->request->post('id')) && is_numeric($this->request->post('sum'))) {
+			$sum = $this->request->post('sum');
+			$id = $this->request->post('id');
+			$part = $this->pixie->orm->get('participant',$id);
+			if($part->loaded()) {
+				$order = $this->pixie->orm->get('order');
+				$order->add('user', $this->pixie->auth->user());
+				$order->sum = $sum;
+				$order->balance = $sum;
+				$order->datecreated = date('Y-m-d H:i:s',time());
+				$order->datepayed = date('Y-m-d H:i:s',time());
+				$order->purpose = serialize(array($id));
+				$order->payed = 1;
+				$order->cash = 1;
+				$part->money = $part->money + $sum;
+				$order->save();
+				$part->save();
+				$this->pixie->party->log(12, "Принят взнос {$sum} руб. для {$part->firstname} {$part->lastname}", $id, $sum);
+				$check = $this->pixie->party->getSumToPay($part);
+				$needtofull = $check['needToFull'];
+				$sumexcess = $check['sumExcess'];
+				die(json_encode(array("status"=>"success","result"=>$part->money,"needtofull"=>$needtofull,"sumexcess"=>$sumexcess)));
+			}
+		}
+	}
+
+
+	public function action_cancelorder() {
+		if(is_numeric($this->request->post('id')) && $this->pixie->auth->user()->id) {
+			$order = $this->pixie->orm->get('order',$this->request->post('id'));
+			if($order->cash && !$order->cancelled) {
+				$purpose = unserialize($order->purpose);
+				if(count($purpose)==1) {
+					$order->cancelled = 1;
+					$part = $this->pixie->orm->get('participant',reset($purpose));
+					$part->money -= $order->balance;
+					$part->save();
+					$order->save();
+
+					$this->pixie->party->log(14, "Отменён платёж {$order->id} на {$order->balance} руб. для {$part->firstname} {$part->lastname}", $order->id, $order->balance);
+					die(json_encode(array("status"=>"success")));
+				}
+				else
+					die(json_encode(array("status"=>"error","result"=>"many purposes")));
+			}
+			else
+				die(json_encode(array("status"=>"error","result"=>"not cash or already cancelled")));
 		}
 	}
 
@@ -94,6 +448,36 @@ class Ajax extends \App\Page {
 		}
 	}
 
+
+
+
+	public function action_geocode() {
+		if($this->request->post('city') && $this->request->post('address')) {
+			$city = mysql_real_escape_string(trim($this->request->post('city')));
+			$address = mysql_real_escape_string(trim($this->request->post('address')));
+			$fields = array(
+				'origin'=>'jsapi2Geocoder',
+				'geocode'=>"г. {$city}, {$address}",
+				'format'=>'json',
+				'rspn'=>'0',
+				'results'=>'1',
+				'lang'=>'ru_RU',
+				'sco'=>'longlat',
+			);
+			$curl_handle = curl_init();
+			curl_setopt($curl_handle, CURLOPT_URL, 'http://geocode-maps.yandex.ru/1.x/');
+			curl_setopt($curl_handle, CURLOPT_CONNECTTIMEOUT, 2);
+			curl_setopt($curl_handle, CURLOPT_RETURNTRANSFER, 1);
+			curl_setopt($curl_handle, CURLOPT_POSTFIELDS, $fields);			
+			$result = curl_exec($curl_handle);
+			$httpCode = curl_getinfo($curl_handle, CURLINFO_HTTP_CODE);
+			curl_close($curl_handle);
+			$result = json_decode($result);
+			$coord = $result->response->GeoObjectCollection->featureMember[0]->GeoObject->Point->pos;
+			$coord = explode(" ", $coord);
+			die(json_encode(array("status"=>"success","result"=>$coord[1] .','. $coord[0])));
+		}
+	}
 
 
 	// Читаем сообщение для регистратора или от него

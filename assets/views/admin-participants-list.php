@@ -1,3 +1,19 @@
+<p>Будут питаться: <?=$page['partsMeal']?> чел.<br/>
+<?php
+ksort($page['daysMeal']);
+$page['daysMeal'] = array_reverse($page['daysMeal'],true);
+
+foreach($page['daysMeal'] as $id=>$day) {
+	echo $id ." ". $this->pixie->party->declension($id,array('день','дня','дней')) .": ". $day ."<br/>";
+}
+
+$total = 0; $i = 1;
+foreach($page['daysMeal'] as $id=>$day) {
+	$total += $day;
+	echo "День {$i}: ". $total ."<br/>";
+	$i++;
+}
+?>В субботу питается парней: <?=$page['partsSatMealMale']?>, девушек: <?=$page['partsSatMealFemale']?>.</p>
 
 <div class="table-responsive">
 <table class="table table-condensed table-hover dataTables participants">

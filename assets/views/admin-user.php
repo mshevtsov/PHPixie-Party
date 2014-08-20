@@ -30,7 +30,8 @@ else if($page['user']->role=='operator')
 else
 	$panel['identity'][] = "<span class=\"text-muted\"><i class=\"fa fa-certificate fa-fw\"></i> Пользователь</span>";
 if($page['user']->money)
-	$panel['identity'][] = "<i class=\"fa fa-money fa-fw text-success\"></i> {$page['user']->money} <i class=\"fa fa-rouble\"></i>";
+	$panel['identity'][] = "<i class=\"fa fa-money fa-fw text-danger\"></i> {$page['user']->money} <i class=\"fa fa-rouble\"></i> свободны";
+
 
 if($page['user']->participants->count_all()) {
 	$team = $page['user']->participants->order_by('gender','asc')->find_all()->as_array();
@@ -43,6 +44,11 @@ if($page['user']->participants->count_all()) {
 if($page['user']->orders->count_all()) {
 	$panel['orders'] = $page['user']->orders->find_all()->as_array();
 	$panel['ordersIcon'] = " <span class=\"pull-right label label-default\"><i class=\"fa fa-money fa-lg fa-fw\"></i> ". count($panel['orders']) ."</span>";
+	$sum = 0;
+	foreach($panel['orders'] as $order)
+		$sum += $order->balance;
+	if($sum)
+		$panel['identity'][] = "<i class=\"fa fa-money fa-fw text-success\"></i> {$sum} <i class=\"fa fa-rouble\"></i>";
 }
 
 if($page['user']->inbox->count_all()) {
@@ -174,6 +180,7 @@ if($page['user']->outbox->count_all()) {
 						<th>назначение</th>
 						<th data-sort="descending">дата заявки</th>
 						<th>дата завершения</th>
+						<th>прибыл</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -199,9 +206,16 @@ if($page['user']->outbox->count_all()) {
 			catch(Exception $e) {
 				echo "ошибка";
 			}
+			if(isset($parts) && count($parts)==1) {
+				$part = $this->pixie->orm->get('participant',reset($parts));
+				$attend = $part->attend;
+			}
+			else
+				$attend = 0;
 			?></td>
 						<td data-order="<?=strtotime($order->datecreated)?>"><?php echo $formatter->format(new \DateTime($order->datecreated)); ?></td>
 						<td data-order="<?=strtotime($order->datepayed ? $order->datepayed : "tomorrow")?>"><?php echo $order->datepayed ? $formatter->format(new \DateTime($order->datepayed)) : "&mdash;"; ?></td>
+						<td data-order="<?=($attend ? 1 : 0)?>"><?=($attend ? "<i class=\"fa fa-check\"></i>" : "")?></td>
 					</tr>
 			<?php endforeach; ?>
 				</tbody>

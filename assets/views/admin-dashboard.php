@@ -1,33 +1,52 @@
 <hr />
 <div class="row">
 	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
-		<div class="dash-count text-danger"><?=$page['partsReady']?><sup title="за сегодня">+<?=$page['partsReadyToday']?></sup></div>
-		<div class="text-muted">оплативших</div>
+		<div class="dash-count text-danger"><a href="/admin/participants"><?=$page['partsReady']?><sup title="за сегодня">+<?=$page['partsReadyToday']?></sup></a></div>
+		<div class="text-muted"><i class="fa fa-users"></i> оплативших</div>
 	</div>
 	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
 		<div class="dash-count text-warning"><?=$page['participants']?><sup title="за сегодня">+<?=$page['participantsToday']?></sup></div>
-		<div class="text-muted">неоплативших</div>
+		<div class="text-muted"><i class="fa fa-child"></i> неоплативших</div>
 	</div>
-	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
+<?php /*	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
 		<div class="dash-count text-success"><?=$page['ordersPayed']?><sup title="за сегодня">+<?=$page['ordersPayedToday']?></sup></div>
 		<div class="text-muted">платежей</div>
-	</div>
+	</div>*/ ?>
 	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
-		<div class="dash-count text-info"><?=$page['payedTotalShort']?></div>
+		<div class="dash-count text-info"><a href="/admin/paylist"><?=$page['payedTotalShort']?></a></div>
 		<div class="text-muted"><i class="fa fa-rouble"></i> получено <span class="text-success" title="за сегодня">+<?=$page['payedToday']?></span></div>
 	</div>
+	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
+		<div class="dash-count text-info"><a href="/admin/cash"><?=$page['payedCashTotalShort']?></a></div>
+		<div class="text-muted"><i class="fa fa-rouble"></i> наличных</div>
+	</div>
 
 	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
-		<div class="dash-count text-primary"><?=$page['countMen']?><sup><i class="fa fa-male text-primary"></i></sup></div>
-		<div class="text-muted">мужчин</div>
+		<div class="dash-count text-success"><a href="/admin/houses"><?=$page['settled']?><small>%</small></a></div>
+		<div class="text-muted"><i class="fa fa-home"></i> расселено</div>
 	</div>
 	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
-		<div class="dash-count text-danger"><?=$page['countWomen']?><sup><i class="fa fa-female text-danger"></i></sup></div>
-		<div class="text-muted">женщин</div>
+		<div class="dash-count text-primary"><?=$page['percentMen']?><small>%</small></div>
+		<div class="text-muted"><i class="fa fa-male"></i> мужчин</div>
 	</div>
+	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
+		<div class="dash-count"><a href="/admin/hello"><?=$page['partsAttend']?></a></div>
+		<div class="text-muted"><i class="fa fa-car"></i> прибыло</div>
+	</div>
+
+	<?php if($page['birthdays']): ?>
+	<div class="col-lg-2 col-md-3 col-sm-6 col-xs-6">
+		<div class="dash-count text-danger"><a href="/admin/birthdays"><?=$page['birthdays']?></a></div>
+		<div class="text-muted"><i class="fa fa-smile-o"></i> <?=$this->pixie->party->declension($page['birthdays'],array('именинник','именинника','именинников'))?></div>
+	</div>
+	<?php endif; ?>
 
 </div>
+
+<div>Общая сумма полученных взносов: <strong><?=$page['totalMoney']?></strong> рублей.</div>
+
 <!-- /. ROW  -->
+<hr/>
 
 <?php
 $formatter = new \IntlDateFormatter('ru_RU', \IntlDateFormatter::FULL, \IntlDateFormatter::FULL);
